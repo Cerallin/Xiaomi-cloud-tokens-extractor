@@ -90,10 +90,10 @@ class XiaomiCloudConnector:
                 if "notificationUrl" in json_resp:
                     verify_url = json_resp["notificationUrl"]
 
-                    print("Two factor authentication required, please use following url:")
+                    print("Two-factor authentication required, please use the following url to get your 2FA code:")
                     print(verify_url)
                     print()
-                    print("Ticket:")
+                    print("Code (input it here, NOT IN THE BROWSER):")
                     ticket = input()
 
                     json_resp = self.verify_ticket(verify_url, ticket)
