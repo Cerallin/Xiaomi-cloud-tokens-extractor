@@ -42,10 +42,22 @@ class XiaomiCloudConnector:
             "userId": self._username
         }
         response = self._session.get(url, headers=headers, cookies=cookies)
-        valid = response.status_code == 200 and "_sign" in self.to_json(response.text)
-        if valid:
-            self._sign = self.to_json(response.text)["_sign"]
-        return valid
+        json_resp = self.to_json(response.text)
+        if response.status_code == 200:
+            if "_sign" in json_resp:
+                self._sign = self.to_json(response.text)["_sign"]
+                return True
+            elif "ssecurity" in json_resp:
+                self._ssecurity = json_resp["ssecurity"]
+                self.userId = json_resp["userId"]
+                self._cUserId = json_resp["cUserId"]
+                self._passToken = json_resp["passToken"]
+                self._location = json_resp["location"]
+                self._code = json_resp["code"]
+
+                return True 
+
+        return False
 
     def login_step_2(self):
         url = "https://account.xiaomi.com/pass/serviceLoginAuth2"
@@ -76,10 +88,65 @@ class XiaomiCloudConnector:
                 self._code = json_resp["code"]
             else:
                 if "notificationUrl" in json_resp:
-                    print("Two factor authentication required, please use following url and restart extractor:")
-                    print(json_resp["notificationUrl"])
+                    verify_url = json_resp["notificationUrl"]
+
+                    print("Two factor authentication required, please use following url:")
+                    print(verify_url)
                     print()
+                    print("Ticket:")
+                    ticket = input()
+
+                    json_resp = self.verify_ticket(verify_url, ticket)
+                    if not json_resp:
+                        print("Failed verifying ticket")
+                        return False
+
+                    location = json_resp["location"]
+                    self._session.get(location, allow_redirects=True)
+                    self.login_step_1()
+
+                    return True
         return valid
+
+    def verify_ticket(self, verify_url, ticket):
+        path = 'identity/authStart'
+        if path not in verify_url:
+            return None
+        resp = self._session.get(verify_url.replace(path, 'identity/list'))
+        identity_session = resp.cookies.get('identity_session')
+        if not identity_session:
+            return False
+        data = self.to_json(resp.text) or {}
+        flag = data.get('flag', 4)
+        options = data.get('options', [flag])
+        
+        for flag in options:
+            api = {
+                4: '/identity/auth/verifyPhone',
+                8: '/identity/auth/verifyEmail',
+            }.get(flag)
+            if not api:
+                continue
+            resp = self._session.post(
+                'https://account.xiaomi.com' + api,
+                params={
+                    '_dc': int(time.time() * 1000),
+                },
+                data={
+                    '_flag': flag,
+                    'ticket': ticket,
+                    'trust': 'true',
+                    '_json': 'true',
+                },
+                cookies={
+                    'identity_session': identity_session,
+                },
+            )
+            data = self.to_json(resp.text)
+            if data.get('code') == 0:
+                return data
+            
+        return False
 
     def login_step_3(self):
         headers = {
